@@ -1,0 +1,10 @@
+.idea/
+.vscode/
+*.iml
+.DS_Store
+target/
+data/
+.mvn/wrapper/apache-maven-*/
+.mvn/wrapper/apache-maven-*-bin.zip
+*.log
+.env
