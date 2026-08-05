@@ -2,6 +2,7 @@ package com.firewolf.cloud.signin;
 
 import com.firewolf.cloud.signin.account.Account;
 import com.firewolf.cloud.signin.account.AccountRepository;
+import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,7 +43,7 @@ class AuthFlowIntegrationTest {
     }
 
     @Test
-    void registerUpdateProfileAndLoginWithAllIdentifiers() throws Exception {
+    void registerUpdateProfileAndLoginWithUsername() throws Exception {
         MockHttpSession registeredSession = register("alice", "Secret123!", "Alice");
 
         Account stored = accountRepository.findByUsernameNormalized("alice").orElseThrow();
@@ -63,8 +64,39 @@ class AuthFlowIntegrationTest {
                 .andExpect(jsonPath("$.data.phone").value("+8613800138000"));
 
         loginAndReadProfile("alice", "Secret123!");
-        loginAndReadProfile("ALICE@EXAMPLE.COM", "Secret123!");
-        loginAndReadProfile("+8613800138000", "Secret123!");
+    }
+
+    @Test
+    void loginWithSingleUseCodesForEmailAndPhone() throws Exception {
+        registerWithContacts("dana", "Dana@Example.com", "+8613900139000");
+
+        String emailCode = requestVerificationCode("EMAIL", "DANA@EXAMPLE.COM");
+        loginWithVerificationCode("EMAIL", "dana@example.com", emailCode);
+
+        CsrfValues reusedCodeCsrf = csrfValues();
+        mockMvc.perform(post("/api/v1/auth/code-login")
+                        .cookie(reusedCodeCsrf.cookie())
+                        .header("X-XSRF-TOKEN", reusedCodeCsrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"channel":"EMAIL","identifier":"dana@example.com","code":"%s"}
+                                """.formatted(emailCode)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_VERIFICATION_CODE"));
+
+        String phoneCode = requestVerificationCode("PHONE", "+86 139-0013-9000");
+        loginWithVerificationCode("PHONE", "+8613900139000", phoneCode);
+
+        CsrfValues passwordCsrf = csrfValues();
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .cookie(passwordCsrf.cookie())
+                        .header("X-XSRF-TOKEN", passwordCsrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"identifier":"dana@example.com","password":"Secret123!"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
     }
 
     @Test
@@ -151,6 +183,48 @@ class AuthFlowIntegrationTest {
                                 {"username":"%s","password":"Secret123!","displayName":"Owner","email":"%s"}
                                 """.formatted(username, email)))
                 .andExpect(status().isCreated());
+    }
+
+    private void registerWithContacts(String username, String email, String phone) throws Exception {
+        CsrfValues csrf = csrfValues();
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .cookie(csrf.cookie())
+                        .header("X-XSRF-TOKEN", csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"%s","password":"Secret123!","displayName":"Dana","email":"%s","phone":"%s"}
+                                """.formatted(username, email, phone)))
+                .andExpect(status().isCreated());
+    }
+
+    private String requestVerificationCode(String channel, String identifier) throws Exception {
+        CsrfValues csrf = csrfValues();
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/verification-codes")
+                        .cookie(csrf.cookie())
+                        .header("X-XSRF-TOKEN", csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"channel":"%s","identifier":"%s"}
+                                """.formatted(channel, identifier)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.expiresInSeconds").value(300))
+                .andExpect(jsonPath("$.data.retryAfterSeconds").value(60))
+                .andExpect(jsonPath("$.data.developmentCode").isString())
+                .andReturn();
+        return JsonPath.read(result.getResponse().getContentAsString(), "$.data.developmentCode");
+    }
+
+    private void loginWithVerificationCode(String channel, String identifier, String code) throws Exception {
+        CsrfValues csrf = csrfValues();
+        mockMvc.perform(post("/api/v1/auth/code-login")
+                        .cookie(csrf.cookie())
+                        .header("X-XSRF-TOKEN", csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"channel":"%s","identifier":"%s","code":"%s"}
+                                """.formatted(channel, identifier, code)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.username").value("dana"));
     }
 
     private void loginAndReadProfile(String identifier, String password) throws Exception {

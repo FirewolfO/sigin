@@ -20,9 +20,9 @@ public class AccountUserDetailsService implements UserDetailsService {
     }
 
     @Override
-    public UserDetails loadUserByUsername(String identifier) throws UsernameNotFoundException {
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         try {
-            Account account = accountService.findByIdentifier(identifier);
+            Account account = accountService.getByUsername(username);
             return User.withUsername(account.getUsername())
                     .password(account.getPasswordHash())
                     .roles("USER")

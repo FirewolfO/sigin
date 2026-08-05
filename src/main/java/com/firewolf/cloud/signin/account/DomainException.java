@@ -25,8 +25,16 @@ public class DomainException extends RuntimeException {
         return new DomainException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "账号或密码错误");
     }
 
+    public static DomainException invalidVerificationCode() {
+        return new DomainException(HttpStatus.UNAUTHORIZED, "INVALID_VERIFICATION_CODE", "手机号、邮箱或验证码错误");
+    }
+
     public static DomainException tooManyRequests(String message) {
         return new DomainException(HttpStatus.TOO_MANY_REQUESTS, "TOO_MANY_REQUESTS", message);
+    }
+
+    public static DomainException serviceUnavailable(String message) {
+        return new DomainException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", message);
     }
 
     public HttpStatus getStatus() {

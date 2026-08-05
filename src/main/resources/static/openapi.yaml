@@ -59,7 +59,7 @@ paths:
   /auth/login:
     post:
       operationId: login
-      summary: Log in with username, email or phone
+      summary: Log in with username and password
       security: []
       parameters:
         - $ref: '#/components/parameters/CsrfHeader'
@@ -69,6 +69,63 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/verification-codes:
+    post:
+      operationId: sendLoginVerificationCode
+      summary: Send a login code to a bound email address or phone number
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendVerificationCodeRequest'
+      responses:
+        '202':
+          description: The request was accepted regardless of whether the account exists
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/VerificationCodeIssue'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /auth/code-login:
+    post:
+      operationId: loginWithVerificationCode
+      summary: Log in with a single-use email or phone verification code
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerificationCodeLoginRequest'
       responses:
         '200':
           $ref: '#/components/responses/UserResponse'
@@ -209,11 +266,53 @@ components:
       properties:
         identifier:
           type: string
-          maxLength: 254
+          maxLength: 32
+          pattern: '^[A-Za-z][A-Za-z0-9_.-]{2,31}$'
         password:
           type: string
           format: password
           maxLength: 72
+    VerificationChannel:
+      type: string
+      enum: [EMAIL, PHONE]
+    SendVerificationCodeRequest:
+      type: object
+      required: [channel, identifier]
+      properties:
+        channel:
+          $ref: '#/components/schemas/VerificationChannel'
+        identifier:
+          type: string
+          maxLength: 254
+          description: A bound email address or E.164 phone number.
+    VerificationCodeLoginRequest:
+      type: object
+      required: [channel, identifier, code]
+      properties:
+        channel:
+          $ref: '#/components/schemas/VerificationChannel'
+        identifier:
+          type: string
+          maxLength: 254
+        code:
+          type: string
+          pattern: '^\d{6}$'
+    VerificationCodeIssue:
+      type: object
+      required: [expiresInSeconds, retryAfterSeconds]
+      properties:
+        expiresInSeconds:
+          type: integer
+          format: int64
+          example: 300
+        retryAfterSeconds:
+          type: integer
+          format: int64
+          example: 60
+        developmentCode:
+          type: [string, 'null']
+          pattern: '^\d{6}$'
+          description: Present only when the explicit local-development exposure switch is enabled.
     UpdateProfileRequest:
       type: object
       required: [displayName]
@@ -306,6 +405,12 @@ components:
             $ref: '#/components/schemas/Error'
     TooManyRequests:
       description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceUnavailable:
+      description: Verification code delivery is unavailable
       content:
         application/json:
           schema:

@@ -4,6 +4,10 @@ import com.firewolf.cloud.signin.account.Account;
 import com.firewolf.cloud.signin.account.AccountService;
 import com.firewolf.cloud.signin.account.AttemptLimiter;
 import com.firewolf.cloud.signin.account.DomainException;
+import com.firewolf.cloud.signin.security.AccountUserDetailsService;
+import com.firewolf.cloud.signin.verification.VerificationCodeDelivery;
+import com.firewolf.cloud.signin.verification.VerificationCodeProperties;
+import com.firewolf.cloud.signin.verification.VerificationCodeService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -13,6 +17,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
@@ -35,23 +40,36 @@ public class AuthController {
 
     private static final Duration LOGIN_WINDOW = Duration.ofMinutes(5);
     private static final Duration REGISTRATION_WINDOW = Duration.ofHours(1);
+    private static final Duration CODE_SEND_WINDOW = Duration.ofHours(1);
 
     private final AccountService accountService;
     private final AttemptLimiter attemptLimiter;
     private final AuthenticationManager authenticationManager;
     private final SessionAuthenticationStrategy sessionAuthenticationStrategy;
     private final SecurityContextRepository securityContextRepository;
+    private final VerificationCodeService verificationCodeService;
+    private final VerificationCodeDelivery verificationCodeDelivery;
+    private final VerificationCodeProperties verificationCodeProperties;
+    private final AccountUserDetailsService userDetailsService;
 
     public AuthController(AccountService accountService,
                           AttemptLimiter attemptLimiter,
                           AuthenticationManager authenticationManager,
                           SessionAuthenticationStrategy sessionAuthenticationStrategy,
-                          SecurityContextRepository securityContextRepository) {
+                          SecurityContextRepository securityContextRepository,
+                          VerificationCodeService verificationCodeService,
+                          VerificationCodeDelivery verificationCodeDelivery,
+                          VerificationCodeProperties verificationCodeProperties,
+                          AccountUserDetailsService userDetailsService) {
         this.accountService = accountService;
         this.attemptLimiter = attemptLimiter;
         this.authenticationManager = authenticationManager;
         this.sessionAuthenticationStrategy = sessionAuthenticationStrategy;
         this.securityContextRepository = securityContextRepository;
+        this.verificationCodeService = verificationCodeService;
+        this.verificationCodeDelivery = verificationCodeDelivery;
+        this.verificationCodeProperties = verificationCodeProperties;
+        this.userDetailsService = userDetailsService;
     }
 
     @GetMapping("/csrf")
@@ -95,6 +113,55 @@ public class AuthController {
         }
     }
 
+    @PostMapping("/verification-codes")
+    public ResponseEntity<ApiResponse<VerificationCodeIssuedView>> sendVerificationCode(
+            @Valid @RequestBody SendVerificationCodeRequest body,
+            HttpServletRequest request) {
+        String normalizedIdentifier = body.identifier().trim().toLowerCase(Locale.ROOT);
+        String rateKeySuffix = request.getRemoteAddr() + ":"
+                + body.channel() + ":" + normalizedIdentifier;
+        String cooldownKey = "verification-code-cooldown:" + rateKeySuffix;
+        String hourlyKey = "verification-code-hourly:" + rateKeySuffix;
+        attemptLimiter.check(cooldownKey, 1, verificationCodeProperties.getResendInterval(),
+                "请稍后再重新发送验证码");
+        attemptLimiter.check(hourlyKey, 5, CODE_SEND_WINDOW, "验证码发送过于频繁，请稍后再试");
+        verificationCodeDelivery.ensureAvailable();
+        VerificationCodeService.IssuedCode issuedCode = verificationCodeService.issue(
+                body.channel(), body.identifier());
+        verificationCodeDelivery.deliver(issuedCode);
+        attemptLimiter.record(cooldownKey, verificationCodeProperties.getResendInterval());
+        attemptLimiter.record(hourlyKey, CODE_SEND_WINDOW);
+
+        String developmentCode = verificationCodeProperties.isExposeInResponse() ? issuedCode.code() : null;
+        VerificationCodeIssuedView view = new VerificationCodeIssuedView(
+                verificationCodeProperties.getTtl().toSeconds(),
+                verificationCodeProperties.getResendInterval().toSeconds(),
+                developmentCode);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.ok(request, view));
+    }
+
+    @PostMapping("/code-login")
+    public ApiResponse<UserView> codeLogin(@Valid @RequestBody VerificationCodeLoginRequest body,
+                                           HttpServletRequest request,
+                                           HttpServletResponse response) {
+        String rateKey = "code-login:" + request.getRemoteAddr() + ":"
+                + body.channel() + ":" + body.identifier().trim().toLowerCase(Locale.ROOT);
+        attemptLimiter.check(rateKey, 5, LOGIN_WINDOW, "验证码错误次数过多，请稍后再试");
+        try {
+            Account account = verificationCodeService.verify(body.channel(), body.identifier(), body.code());
+            UserDetails principal = userDetailsService.loadUserByUsername(account.getUsername());
+            Authentication authentication = UsernamePasswordAuthenticationToken.authenticated(
+                    principal, null, principal.getAuthorities());
+            establishSession(authentication, request, response);
+            attemptLimiter.reset(rateKey);
+            Account current = accountService.recordLogin(authentication.getName());
+            return ApiResponse.ok(request, UserView.from(current));
+        } catch (DomainException exception) {
+            attemptLimiter.record(rateKey, LOGIN_WINDOW);
+            throw exception;
+        }
+    }
+
     @GetMapping("/me")
     public ApiResponse<UserView> me(Authentication authentication, HttpServletRequest request) {
         Account account = accountService.getByUsername(authentication.getName());
@@ -113,11 +180,16 @@ public class AuthController {
                                         HttpServletRequest request, HttpServletResponse response) {
         Authentication authentication = authenticationManager.authenticate(
                 UsernamePasswordAuthenticationToken.unauthenticated(identifier, password));
+        establishSession(authentication, request, response);
+        return authentication;
+    }
+
+    private void establishSession(Authentication authentication,
+                                  HttpServletRequest request, HttpServletResponse response) {
         sessionAuthenticationStrategy.onAuthentication(authentication, request, response);
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(authentication);
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, request, response);
-        return authentication;
     }
 }

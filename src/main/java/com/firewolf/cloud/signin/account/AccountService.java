@@ -47,14 +47,6 @@ public class AccountService {
     }
 
     @Transactional(readOnly = true)
-    public Account findByIdentifier(String value) {
-        AccountNormalizer.LoginIdentifier identifier = normalizer.loginIdentifier(value);
-        return repository.findFirstByUsernameNormalizedOrEmailNormalizedOrPhoneNormalized(
-                        identifier.username(), identifier.email(), identifier.phone())
-                .orElseThrow(DomainException::unauthorized);
-    }
-
-    @Transactional(readOnly = true)
     public Account getByUsername(String username) {
         return repository.findByUsernameNormalized(username.toLowerCase(Locale.ROOT))
                 .orElseThrow(DomainException::unauthorized);

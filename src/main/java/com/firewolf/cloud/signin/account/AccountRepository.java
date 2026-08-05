@@ -9,8 +9,9 @@ public interface AccountRepository extends JpaRepository<Account, UUID> {
 
     Optional<Account> findByUsernameNormalized(String usernameNormalized);
 
-    Optional<Account> findFirstByUsernameNormalizedOrEmailNormalizedOrPhoneNormalized(
-            String usernameNormalized, String emailNormalized, String phoneNormalized);
+    Optional<Account> findByEmailNormalized(String emailNormalized);
+
+    Optional<Account> findByPhoneNormalized(String phoneNormalized);
 
     boolean existsByUsernameNormalized(String usernameNormalized);
 

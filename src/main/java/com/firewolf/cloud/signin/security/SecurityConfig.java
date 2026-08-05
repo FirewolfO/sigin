@@ -88,7 +88,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/v1/auth/csrf", "/api/v1/auth/login", "/api/v1/auth/register").permitAll()
+                        .requestMatchers("/api/v1/auth/csrf", "/api/v1/auth/login", "/api/v1/auth/register",
+                                "/api/v1/auth/verification-codes", "/api/v1/auth/code-login").permitAll()
                         .requestMatchers("/actuator/health", "/error", "/openapi.yaml").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors

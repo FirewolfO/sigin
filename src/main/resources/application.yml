@@ -40,3 +40,10 @@ management:
 
 signin:
   allowed-origins: ${SIGNIN_ALLOWED_ORIGINS:http://localhost:5176,http://127.0.0.1:5176}
+  verification-code:
+    ttl: 5m
+    resend-interval: 60s
+    max-attempts: 5
+    expose-in-response: ${SIGNIN_VERIFICATION_CODE_EXPOSE:false}
+    delivery-webhook: ${SIGNIN_VERIFICATION_CODE_WEBHOOK:}
+    delivery-token: ${SIGNIN_VERIFICATION_CODE_TOKEN:}

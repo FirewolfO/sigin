@@ -12,3 +12,5 @@ spring:
 
 signin:
   allowed-origins: http://localhost:5176
+  verification-code:
+    expose-in-response: true

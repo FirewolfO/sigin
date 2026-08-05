@@ -79,17 +79,6 @@ public class AccountNormalizer {
         return normalized;
     }
 
-    public LoginIdentifier loginIdentifier(String value) {
-        String raw = required(value, "账号、手机号或邮箱不能为空");
-        String username = raw.toLowerCase(Locale.ROOT);
-        String email = raw.toLowerCase(Locale.ROOT);
-        String phone = raw.replaceAll("[\\s()-]", "");
-        if (phone.startsWith("00")) {
-            phone = "+" + phone.substring(2);
-        }
-        return new LoginIdentifier(username, email, phone);
-    }
-
     private String required(String value, String message) {
         String normalized = optional(value);
         if (normalized == null) {
@@ -104,8 +93,5 @@ public class AccountNormalizer {
         }
         String normalized = value.trim();
         return normalized.isEmpty() ? null : normalized;
-    }
-
-    public record LoginIdentifier(String username, String email, String phone) {
     }
 }
