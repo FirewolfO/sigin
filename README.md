@@ -22,7 +22,7 @@ export SIGNIN_INNER_GATEWAY_SECRET_KEY='gwsk_...'
 
 服务固定默认监听 `http://localhost:8084`，数据库默认保存到 `./data/signin.mv.db`。常用配置见 [.env.example](.env.example)。
 
-浏览器调用写接口前，需要先请求 `GET /api/v1/auth/csrf`。服务会设置 `XSRF-TOKEN` Cookie；后续请求同时携带 Session Cookie，并将该值放入 `X-XSRF-TOKEN` 请求头。`cloud-ui` 的统一 API Client 已实现此流程。
+浏览器只在注册、登录和验证码流程中直接请求本服务，并在写请求前调用 `GET /api/v1/auth/csrf`。登录后的用户、退出、资料、密码和 API 密钥请求由 `cloud-ui` 统一发往 Gateway 的 `/api/open/signin/**`，不再直连本服务。
 
 本地联调验证码登录时显式设置 `SIGNIN_VERIFICATION_CODE_EXPOSE=true`，发送接口会在 `developmentCode` 字段返回测试验证码。该开关不得用于生产环境，也不得记录验证码。生产环境应配置：
 
@@ -58,7 +58,7 @@ Webhook 接收 `POST` JSON 请求，字段为 `channel`（`EMAIL` 或 `PHONE`）
 
 验证码为安全随机生成的 6 位数字，仅以 BCrypt 摘要存储在 `login_verification_codes` 表中。验证码 5 分钟过期、60 秒内不可重发、每小时最多发送 5 次、最多尝试 5 次，并在成功登录后立即失效。
 
-用户 SK 使用 `SIGNIN_CREDENTIAL_ENCRYPTION_KEY` 经 AES-GCM 加密入库，列表接口只返回掩码；用户显式复制时，后端在校验 Session、CSRF 和凭据归属后仅返回该条 SK。主密钥在生产环境中必须稳定保存。Gateway 调用 Inner 接口使用 `SIGNIN_INNER_GATEWAY_ACCESS_KEY` 和 `SIGNIN_INNER_GATEWAY_SECRET_KEY`；这组值必须与 Gateway 的调用配置一致。
+用户 SK 和登录态交换得到的短期 STS SK 都使用 `SIGNIN_CREDENTIAL_ENCRYPTION_KEY` 经 AES-GCM 加密入库。Gateway 先通过已注册的 `/api/inner/signin/credentials/exchange` 把 `CLOUD_SESSION` 换成 STS，再用 STS 对实际上游路径重新签名；本服务验签后仅为当前请求恢复用户身份。Gateway 调用 Inner 接口使用 `SIGNIN_INNER_GATEWAY_ACCESS_KEY` 和 `SIGNIN_INNER_GATEWAY_SECRET_KEY`；这组值必须与 Gateway 的调用配置一致。
 
 ## 验证
 

@@ -1,6 +1,7 @@
 package com.firewolf.cloud.signin.security;
 
 import com.firewolf.cloud.signin.web.RequestIdFilter;
+import com.firewolf.cloud.signin.credential.ApiCredentialService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -23,6 +24,7 @@ import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -78,8 +80,10 @@ public class SecurityConfig {
     GatewayHmacFilter gatewayHmacFilter(
             @Value("${signin.inner.gateway-access-key}") String accessKey,
             @Value("${signin.inner.gateway-secret-key}") String secretKey,
-            @Value("${signin.inner.signature-skew:5m}") Duration signatureSkew) {
-        return new GatewayHmacFilter(accessKey, secretKey, signatureSkew);
+            @Value("${signin.inner.signature-skew:5m}") Duration signatureSkew,
+            ApiCredentialService credentialService,
+            AccountUserDetailsService userDetailsService) {
+        return new GatewayHmacFilter(accessKey, secretKey, signatureSkew, credentialService, userDetailsService);
     }
 
     @Bean
@@ -92,7 +96,9 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
-                        .ignoringRequestMatchers("/api/v1/inner/**")
+                        .ignoringRequestMatchers(
+                                (RequestMatcher) request -> request.getRequestURI().startsWith("/api/v1/inner/"),
+                                (RequestMatcher) request -> request.getHeader("X-Gateway-Credential") != null)
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
                 .securityContext(context -> context
                         .securityContextRepository(securityContextRepository)

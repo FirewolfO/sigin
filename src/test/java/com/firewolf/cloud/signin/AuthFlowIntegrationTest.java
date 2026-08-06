@@ -3,6 +3,7 @@ package com.firewolf.cloud.signin;
 import com.firewolf.cloud.signin.account.Account;
 import com.firewolf.cloud.signin.account.AccountRepository;
 import com.firewolf.cloud.signin.credential.ApiCredentialRepository;
+import com.firewolf.cloud.signin.credential.TemporaryApiCredentialRepository;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,10 +48,14 @@ class AuthFlowIntegrationTest {
     private ApiCredentialRepository apiCredentialRepository;
 
     @Autowired
+    private TemporaryApiCredentialRepository temporaryApiCredentialRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @BeforeEach
     void clearAccounts() {
+        temporaryApiCredentialRepository.deleteAll();
         apiCredentialRepository.deleteAll();
         accountRepository.deleteAll();
     }
@@ -275,11 +280,21 @@ class AuthFlowIntegrationTest {
                 .andExpect(jsonPath("$.data.accessKey").value(accessKey))
                 .andExpect(jsonPath("$.data.secretKey").value(secretKey))
                 .andExpect(jsonPath("$.data.expiresAt").doesNotExist());
-        mockMvc.perform(signedInnerPost("/api/v1/inner/credentials/exchange", "{}").session(session))
+        MvcResult exchanged = mockMvc.perform(
+                        signedInnerPost("/api/v1/inner/credentials/exchange", "{}").session(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.accessKey").value(org.hamcrest.Matchers.startsWith("utak_")))
                 .andExpect(jsonPath("$.data.secretKey").value(org.hamcrest.Matchers.startsWith("utsk_")))
-                .andExpect(jsonPath("$.data.expiresAt").isString());
+                .andExpect(jsonPath("$.data.expiresAt").isString())
+                .andReturn();
+        String temporaryAccessKey = JsonPath.read(
+                exchanged.getResponse().getContentAsString(), "$.data.accessKey");
+        String temporarySecretKey = JsonPath.read(
+                exchanged.getResponse().getContentAsString(), "$.data.secretKey");
+        mockMvc.perform(signedGatewayGet(
+                        "/api/v1/auth/me?z=1&a=0", "a=0&z=1", temporaryAccessKey, temporarySecretKey))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.username").value("developer"));
 
         CsrfValues deleteCsrf = csrfValues();
         mockMvc.perform(delete("/api/v1/account/api-credentials/{id}", credentialId)
@@ -402,6 +417,25 @@ class AuthFlowIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
                 .header("X-Gateway-Credential", "gwak_gateway_test")
+                .header("X-Gateway-Timestamp", timestamp)
+                .header("X-Gateway-Nonce", nonce)
+                .header("X-Gateway-Content-SHA256", payloadHash)
+                .header("X-Gateway-Signature", signature);
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder signedGatewayGet(
+            String requestTarget, String canonicalQuery, String accessKey, String secretKey) throws Exception {
+        String path = requestTarget.split("\\?", 2)[0];
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String nonce = UUID.randomUUID().toString().replace("-", "");
+        String payloadHash = HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(new byte[0]));
+        String canonical = String.join("\n", "GET", path, canonicalQuery, timestamp, nonce, payloadHash);
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        String signature = HexFormat.of().formatHex(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+        return get(requestTarget)
+                .header("X-Gateway-Credential", accessKey)
                 .header("X-Gateway-Timestamp", timestamp)
                 .header("X-Gateway-Nonce", nonce)
                 .header("X-Gateway-Content-SHA256", payloadHash)

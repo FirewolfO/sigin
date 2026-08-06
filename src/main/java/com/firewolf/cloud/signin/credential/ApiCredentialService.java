@@ -21,16 +21,19 @@ public class ApiCredentialService {
 
     private static final int MAX_CREDENTIALS = 10;
     private final ApiCredentialRepository credentialRepository;
+    private final TemporaryApiCredentialRepository temporaryCredentialRepository;
     private final AccountRepository accountRepository;
     private final SecretCipher secretCipher;
     private final Duration temporaryTtl;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public ApiCredentialService(ApiCredentialRepository credentialRepository,
+                                TemporaryApiCredentialRepository temporaryCredentialRepository,
                                 AccountRepository accountRepository,
                                 SecretCipher secretCipher,
                                 @Value("${signin.credentials.temporary-ttl:5m}") Duration temporaryTtl) {
         this.credentialRepository = credentialRepository;
+        this.temporaryCredentialRepository = temporaryCredentialRepository;
         this.accountRepository = accountRepository;
         this.secretCipher = secretCipher;
         this.temporaryTtl = temporaryTtl;
@@ -87,15 +90,46 @@ public class ApiCredentialService {
                 secretCipher.decrypt(credential.getSecretKeyEncrypted()), null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public IssuedCredential exchange(String username) {
         Account account = account(username);
         if (account.getStatus() != AccountStatus.ACTIVE) {
             throw DomainException.innerUnauthorized();
         }
         Instant expiresAt = Instant.now().plus(temporaryTtl);
-        return new IssuedCredential(account.getId(), randomToken("utak_", 18),
-                randomToken("utsk_", 32), expiresAt);
+        String accessKey = randomToken("utak_", 18);
+        String secretKey = randomToken("utsk_", 32);
+        temporaryCredentialRepository.deleteByExpiresAtLessThanEqual(Instant.now());
+        temporaryCredentialRepository.save(new TemporaryApiCredential(
+                account, accessKey, secretCipher.encrypt(secretKey), expiresAt));
+        return new IssuedCredential(account.getId(), accessKey, secretKey, expiresAt);
+    }
+
+    @Transactional(readOnly = true)
+    public AuthenticatedCredential authenticate(String accessKey) {
+        if (accessKey == null || accessKey.isBlank()) {
+            throw DomainException.innerUnauthorized();
+        }
+        if (accessKey.startsWith("utak_")) {
+            TemporaryApiCredential credential = temporaryCredentialRepository.findByAccessKey(accessKey)
+                    .orElseThrow(DomainException::innerUnauthorized);
+            if (!credential.getExpiresAt().isAfter(Instant.now())) {
+                throw DomainException.innerUnauthorized();
+            }
+            return authenticated(credential.getAccount(), credential.getAccessKey(),
+                    credential.getSecretKeyEncrypted());
+        }
+        ApiCredential credential = credentialRepository.findByAccessKey(accessKey)
+                .orElseThrow(DomainException::innerUnauthorized);
+        return authenticated(credential.getAccount(), credential.getAccessKey(), credential.getSecretKeyEncrypted());
+    }
+
+    private AuthenticatedCredential authenticated(Account account, String accessKey, String encryptedSecretKey) {
+        if (account.getStatus() != AccountStatus.ACTIVE) {
+            throw DomainException.innerUnauthorized();
+        }
+        return new AuthenticatedCredential(account.getId(), account.getUsername(), accessKey,
+                secretCipher.decrypt(encryptedSecretKey));
     }
 
     private Account account(String username) {
@@ -113,5 +147,8 @@ public class ApiCredentialService {
     }
 
     public record IssuedCredential(UUID accountId, String accessKey, String secretKey, Instant expiresAt) {
+    }
+
+    public record AuthenticatedCredential(UUID accountId, String username, String accessKey, String secretKey) {
     }
 }

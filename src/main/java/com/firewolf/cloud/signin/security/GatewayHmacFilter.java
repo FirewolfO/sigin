@@ -1,5 +1,6 @@
 package com.firewolf.cloud.signin.security;
 
+import com.firewolf.cloud.signin.credential.ApiCredentialService;
 import com.firewolf.cloud.signin.web.RequestIdFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
@@ -9,6 +10,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import javax.crypto.Mac;
@@ -18,13 +23,19 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.BufferedReader;
 import java.nio.charset.StandardCharsets;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class GatewayHmacFilter extends OncePerRequestFilter {
@@ -38,9 +49,13 @@ public class GatewayHmacFilter extends OncePerRequestFilter {
     private final String accessKey;
     private final String secretKey;
     private final Duration signatureSkew;
+    private final ApiCredentialService credentialService;
+    private final AccountUserDetailsService userDetailsService;
     private final Map<String, Instant> nonces = new ConcurrentHashMap<>();
 
-    public GatewayHmacFilter(String accessKey, String secretKey, Duration signatureSkew) {
+    public GatewayHmacFilter(String accessKey, String secretKey, Duration signatureSkew,
+                             ApiCredentialService credentialService,
+                             AccountUserDetailsService userDetailsService) {
         if (accessKey == null || accessKey.isBlank() || secretKey == null
                 || secretKey.getBytes(StandardCharsets.UTF_8).length < 32 || signatureSkew.isNegative()
                 || signatureSkew.isZero()) {
@@ -49,11 +64,14 @@ public class GatewayHmacFilter extends OncePerRequestFilter {
         this.accessKey = accessKey;
         this.secretKey = secretKey;
         this.signatureSkew = signatureSkew;
+        this.credentialService = credentialService;
+        this.userDetailsService = userDetailsService;
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/v1/inner/");
+        return !request.getRequestURI().startsWith("/api/v1/inner/")
+                && request.getHeader(CREDENTIAL_HEADER) == null;
     }
 
     @Override
@@ -66,24 +84,48 @@ public class GatewayHmacFilter extends OncePerRequestFilter {
             return;
         }
         CachedBodyRequest wrapped = new CachedBodyRequest(request, body);
-        if (!verify(wrapped, body)) {
+        boolean innerRequest = request.getRequestURI().startsWith("/api/v1/inner/");
+        ApiCredentialService.AuthenticatedCredential authenticatedCredential = null;
+        String expectedAccessKey = accessKey;
+        String expectedSecretKey = secretKey;
+        if (!innerRequest) {
+            try {
+                authenticatedCredential = credentialService.authenticate(request.getHeader(CREDENTIAL_HEADER));
+                expectedAccessKey = authenticatedCredential.accessKey();
+                expectedSecretKey = authenticatedCredential.secretKey();
+            } catch (RuntimeException exception) {
+                writeError(request, response, HttpServletResponse.SC_UNAUTHORIZED,
+                        "UNAUTHORIZED", "Gateway 调用认证失败");
+                return;
+            }
+        }
+        if (!verify(wrapped, body, expectedAccessKey, expectedSecretKey)) {
             writeError(request, response, HttpServletResponse.SC_UNAUTHORIZED,
-                    "UNAUTHORIZED", "内部调用认证失败");
+                    "UNAUTHORIZED", "Gateway 调用认证失败");
             return;
+        }
+        if (authenticatedCredential != null) {
+            UserDetails userDetails = userDetailsService.loadUserByUsername(authenticatedCredential.username());
+            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                    userDetails, null, userDetails.getAuthorities());
+            SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
+            securityContext.setAuthentication(authentication);
+            SecurityContextHolder.setContext(securityContext);
         }
         filterChain.doFilter(wrapped, response);
     }
 
-    private boolean verify(HttpServletRequest request, byte[] body) {
+    private boolean verify(HttpServletRequest request, byte[] body,
+                           String expectedAccessKey, String expectedSecretKey) {
         try {
             String suppliedAccessKey = request.getHeader(CREDENTIAL_HEADER);
             String timestamp = request.getHeader(TIMESTAMP_HEADER);
             String nonce = request.getHeader(NONCE_HEADER);
             String suppliedPayloadHash = request.getHeader(PAYLOAD_HEADER);
             String suppliedSignature = request.getHeader(SIGNATURE_HEADER);
-            if (!constantEquals(accessKey, suppliedAccessKey) || timestamp == null || nonce == null
+            if (!constantEquals(expectedAccessKey, suppliedAccessKey) || timestamp == null || nonce == null
                     || nonce.length() < 16 || nonce.length() > 128 || suppliedPayloadHash == null
-                    || suppliedSignature == null || request.getQueryString() != null) {
+                    || suppliedSignature == null) {
                 return false;
             }
             Instant requestTime = Instant.ofEpochSecond(Long.parseLong(timestamp));
@@ -95,13 +137,13 @@ public class GatewayHmacFilter extends OncePerRequestFilter {
             if (!constantEquals(payloadHash, suppliedPayloadHash.toLowerCase())) {
                 return false;
             }
-            String canonical = String.join("\n", request.getMethod().toUpperCase(), request.getRequestURI(), "",
-                    timestamp, nonce, payloadHash);
-            if (!constantEquals(hmac(canonical), suppliedSignature.toLowerCase())) {
+            String canonical = String.join("\n", request.getMethod().toUpperCase(), request.getRequestURI(),
+                    canonicalQuery(request.getQueryString()), timestamp, nonce, payloadHash);
+            if (!constantEquals(hmac(expectedSecretKey, canonical), suppliedSignature.toLowerCase())) {
                 return false;
             }
             purgeExpiredNonces(now);
-            return nonces.putIfAbsent(accessKey + ":" + nonce, requestTime.plus(signatureSkew)) == null;
+            return nonces.putIfAbsent(expectedAccessKey + ":" + nonce, requestTime.plus(signatureSkew)) == null;
         } catch (RuntimeException | GeneralSecurityException exception) {
             return false;
         }
@@ -120,9 +162,43 @@ public class GatewayHmacFilter extends OncePerRequestFilter {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body));
     }
 
-    private String hmac(String canonical) throws GeneralSecurityException {
+    private String canonicalQuery(String rawQuery) {
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return "";
+        }
+        if (rawQuery.indexOf(';') >= 0) {
+            throw new IllegalArgumentException("invalid query string");
+        }
+        Map<String, List<String>> values = new TreeMap<>();
+        for (String pair : rawQuery.split("&", -1)) {
+            if (pair.isEmpty()) {
+                continue;
+            }
+            String[] parts = pair.split("=", 2);
+            String key = URLDecoder.decode(parts[0], StandardCharsets.UTF_8);
+            String value = parts.length == 2 ? URLDecoder.decode(parts[1], StandardCharsets.UTF_8) : "";
+            values.computeIfAbsent(key, ignored -> new ArrayList<>()).add(value);
+        }
+        List<String> encoded = new ArrayList<>();
+        values.forEach((key, items) -> {
+            Collections.sort(items);
+            for (String item : items) {
+                encoded.add(rfc3986Encode(key) + "=" + rfc3986Encode(item));
+            }
+        });
+        return String.join("&", encoded);
+    }
+
+    private String rfc3986Encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8)
+                .replace("+", "%20")
+                .replace("*", "%2A")
+                .replace("%7E", "~");
+    }
+
+    private String hmac(String secret, String canonical) throws GeneralSecurityException {
         Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         return HexFormat.of().formatHex(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
     }
 
