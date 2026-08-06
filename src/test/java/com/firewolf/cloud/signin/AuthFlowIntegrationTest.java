@@ -193,6 +193,19 @@ class AuthFlowIntegrationTest {
         mockMvc.perform(get("/api/v1/account/api-credentials").session(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].secretKey").value("************************"));
+
+        mockMvc.perform(post("/api/v1/account/api-credentials/{id}/secret", credentialId)
+                        .session(session))
+                .andExpect(status().isForbidden());
+
+        CsrfValues secretCsrf = csrfValues();
+        mockMvc.perform(post("/api/v1/account/api-credentials/{id}/secret", credentialId)
+                        .session(session)
+                        .cookie(secretCsrf.cookie())
+                        .header("X-XSRF-TOKEN", secretCsrf.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.secretKey").value(secretKey));
+
         String resolveBody = "{\"accessKey\":\"" + accessKey + "\"}";
         mockMvc.perform(post("/api/v1/inner/credentials/resolve")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -47,6 +47,7 @@ Webhook 接收 `POST` JSON 请求，字段为 `channel`（`EMAIL` 或 `PHONE`）
 | `POST` | `/api/v1/auth/logout` | 是 | 注销并使 Session 失效 |
 | `PUT` | `/api/v1/account/profile` | 是 | 修改显示名称、邮箱、手机号和头像 |
 | `GET/POST` | `/api/v1/account/api-credentials` | 是 | 查询或创建用户 API AK/SK |
+| `POST` | `/api/v1/account/api-credentials/{id}/secret` | 是 | 按需读取当前账号的一条 SK，用于显式复制 |
 | `DELETE` | `/api/v1/account/api-credentials/{id}` | 是 | 删除用户 API AK/SK |
 | `POST` | `/api/v1/inner/credentials/resolve` | Gateway HMAC | 解析有效的用户 AK/SK，具体 OpenAPI 是否允许编程访问由 Gateway 路由配置决定 |
 | `POST` | `/api/v1/inner/credentials/exchange` | Gateway HMAC + Session | 将登录态换成短期 AK/SK |
@@ -56,7 +57,7 @@ Webhook 接收 `POST` JSON 请求，字段为 `channel`（`EMAIL` 或 `PHONE`）
 
 验证码为安全随机生成的 6 位数字，仅以 BCrypt 摘要存储在 `login_verification_codes` 表中。验证码 5 分钟过期、60 秒内不可重发、每小时最多发送 5 次、最多尝试 5 次，并在成功登录后立即失效。
 
-用户 SK 使用 `SIGNIN_CREDENTIAL_ENCRYPTION_KEY` 经 AES-GCM 加密入库，主密钥在生产环境中必须稳定保存。Gateway 调用 Inner 接口使用 `SIGNIN_INNER_GATEWAY_ACCESS_KEY` 和 `SIGNIN_INNER_GATEWAY_SECRET_KEY`；这组值必须与 Gateway 的调用配置一致。
+用户 SK 使用 `SIGNIN_CREDENTIAL_ENCRYPTION_KEY` 经 AES-GCM 加密入库，列表接口只返回掩码；用户显式复制时，后端在校验 Session、CSRF 和凭据归属后仅返回该条 SK。主密钥在生产环境中必须稳定保存。Gateway 调用 Inner 接口使用 `SIGNIN_INNER_GATEWAY_ACCESS_KEY` 和 `SIGNIN_INNER_GATEWAY_SECRET_KEY`；这组值必须与 Gateway 的调用配置一致。
 
 ## 验证
 

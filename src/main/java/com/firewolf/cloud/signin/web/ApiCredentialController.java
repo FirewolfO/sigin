@@ -42,6 +42,14 @@ public class ApiCredentialController {
         return ApiResponse.created(request, ApiCredentialView.created(generated.credential(), generated.secretKey()));
     }
 
+    @PostMapping("/api-credentials/{id}/secret")
+    public ApiResponse<ApiCredentialSecretView> secret(Authentication authentication,
+                                                       @PathVariable UUID id,
+                                                       HttpServletRequest request) {
+        String secretKey = credentialService.secret(authentication.getName(), id);
+        return ApiResponse.ok(request, new ApiCredentialSecretView(secretKey));
+    }
+
     @DeleteMapping("/api-credentials/{id}")
     public ApiResponse<Map<String, Boolean>> delete(Authentication authentication,
                                                     @PathVariable UUID id,

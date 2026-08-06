@@ -68,6 +68,14 @@ public class ApiCredentialService {
     }
 
     @Transactional(readOnly = true)
+    public String secret(String username, UUID credentialId) {
+        Account account = account(username);
+        ApiCredential credential = credentialRepository.findByIdAndAccountId(credentialId, account.getId())
+                .orElseThrow(() -> DomainException.notFound("API 访问密钥不存在"));
+        return secretCipher.decrypt(credential.getSecretKeyEncrypted());
+    }
+
+    @Transactional(readOnly = true)
     public IssuedCredential resolve(String accessKey) {
         ApiCredential credential = credentialRepository.findByAccessKey(accessKey)
                 .orElseThrow(DomainException::innerUnauthorized);

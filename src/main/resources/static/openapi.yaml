@@ -276,6 +276,38 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           description: Credential not found
+  /account/api-credentials/{id}/secret:
+    post:
+      operationId: getApiCredentialSecret
+      summary: Return one API credential secret owned by the current account
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Plaintext secret for an explicit copy action
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ApiCredentialSecret'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Credential not found
   /inner/credentials/resolve:
     post:
       operationId: resolveApiCredential
@@ -507,10 +539,17 @@ components:
           type: string
         secretKey:
           type: string
-          description: Plaintext only in the create response; masked in list responses.
+          description: Plaintext in create responses and masked in list responses.
         createdAt:
           type: string
           format: date-time
+    ApiCredentialSecret:
+      type: object
+      required: [secretKey]
+      properties:
+        secretKey:
+          type: string
+          description: Plaintext secret returned only for an explicit authenticated copy action.
     IssuedCredential:
       type: object
       required: [accountId, accessKey, secretKey]
