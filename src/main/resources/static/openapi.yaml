@@ -276,42 +276,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           description: Credential not found
-  /account/programming-access:
-    get:
-      operationId: getProgrammingAccess
-      summary: Read the current programming access setting
-      security:
-        - sessionCookie: []
-      responses:
-        '200':
-          description: Programming access setting
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Envelope'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/ProgrammingAccess'
-    put:
-      operationId: updateProgrammingAccess
-      summary: Enable or disable permanent API credential access
-      security:
-        - sessionCookie: []
-      parameters:
-        - $ref: '#/components/parameters/CsrfHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProgrammingAccess'
-      responses:
-        '200':
-          description: Updated programming access setting
-        '401':
-          $ref: '#/components/responses/Unauthorized'
   /inner/credentials/resolve:
     post:
       operationId: resolveApiCredential
@@ -347,8 +311,6 @@ paths:
                         $ref: '#/components/schemas/IssuedCredential'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '403':
-          description: Programming access is disabled
   /inner/credentials/exchange:
     post:
       operationId: exchangeSessionCredential
@@ -549,12 +511,6 @@ components:
         createdAt:
           type: string
           format: date-time
-    ProgrammingAccess:
-      type: object
-      required: [enabled]
-      properties:
-        enabled:
-          type: boolean
     IssuedCredential:
       type: object
       required: [accountId, accessKey, secretKey]

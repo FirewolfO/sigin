@@ -193,30 +193,12 @@ class AuthFlowIntegrationTest {
         mockMvc.perform(get("/api/v1/account/api-credentials").session(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].secretKey").value("************************"));
-        mockMvc.perform(get("/api/v1/account/programming-access").session(session))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.enabled").value(false));
-
         String resolveBody = "{\"accessKey\":\"" + accessKey + "\"}";
         mockMvc.perform(post("/api/v1/inner/credentials/resolve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(resolveBody))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
-        mockMvc.perform(signedInnerPost("/api/v1/inner/credentials/resolve", resolveBody))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PROGRAMMING_ACCESS_DISABLED"));
-
-        CsrfValues toggleCsrf = csrfValues();
-        mockMvc.perform(put("/api/v1/account/programming-access")
-                        .session(session)
-                        .cookie(toggleCsrf.cookie())
-                        .header("X-XSRF-TOKEN", toggleCsrf.token())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"enabled\":true}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.enabled").value(true));
-
         mockMvc.perform(signedInnerPost("/api/v1/inner/credentials/resolve", resolveBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.accessKey").value(accessKey))

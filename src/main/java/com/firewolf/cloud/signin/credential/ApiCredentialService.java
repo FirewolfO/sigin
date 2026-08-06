@@ -68,27 +68,12 @@ public class ApiCredentialService {
     }
 
     @Transactional(readOnly = true)
-    public boolean programmingAccess(String username) {
-        return account(username).isProgrammingAccessEnabled();
-    }
-
-    @Transactional
-    public boolean updateProgrammingAccess(String username, boolean enabled) {
-        Account account = account(username);
-        account.setProgrammingAccessEnabled(enabled);
-        return enabled;
-    }
-
-    @Transactional(readOnly = true)
     public IssuedCredential resolve(String accessKey) {
         ApiCredential credential = credentialRepository.findByAccessKey(accessKey)
                 .orElseThrow(DomainException::innerUnauthorized);
         Account account = credential.getAccount();
         if (account.getStatus() != AccountStatus.ACTIVE) {
             throw DomainException.innerUnauthorized();
-        }
-        if (!account.isProgrammingAccessEnabled()) {
-            throw DomainException.programmingAccessDisabled();
         }
         return new IssuedCredential(account.getId(), credential.getAccessKey(),
                 secretCipher.decrypt(credential.getSecretKeyEncrypted()), null);

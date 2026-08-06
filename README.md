@@ -48,8 +48,7 @@ Webhook 接收 `POST` JSON 请求，字段为 `channel`（`EMAIL` 或 `PHONE`）
 | `PUT` | `/api/v1/account/profile` | 是 | 修改显示名称、邮箱、手机号和头像 |
 | `GET/POST` | `/api/v1/account/api-credentials` | 是 | 查询或创建用户 API AK/SK |
 | `DELETE` | `/api/v1/account/api-credentials/{id}` | 是 | 删除用户 API AK/SK |
-| `GET/PUT` | `/api/v1/account/programming-access` | 是 | 查询或修改编程访问开关 |
-| `POST` | `/api/v1/inner/credentials/resolve` | Gateway HMAC | 解析已开启编程访问的用户 AK/SK |
+| `POST` | `/api/v1/inner/credentials/resolve` | Gateway HMAC | 解析有效的用户 AK/SK，具体 OpenAPI 是否允许编程访问由 Gateway 路由配置决定 |
 | `POST` | `/api/v1/inner/credentials/exchange` | Gateway HMAC + Session | 将登录态换成短期 AK/SK |
 | `GET` | `/actuator/health` | 否 | 健康检查 |
 

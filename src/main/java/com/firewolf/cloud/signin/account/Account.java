@@ -54,9 +54,6 @@ public class Account {
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 
-    @Column(name = "programming_access_enabled", nullable = false)
-    private boolean programmingAccessEnabled;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -110,10 +107,6 @@ public class Account {
         this.lastLoginAt = Instant.now();
     }
 
-    public void setProgrammingAccessEnabled(boolean enabled) {
-        this.programmingAccessEnabled = enabled;
-    }
-
     public UUID getId() {
         return id;
     }
@@ -152,10 +145,6 @@ public class Account {
 
     public Instant getLastLoginAt() {
         return lastLoginAt;
-    }
-
-    public boolean isProgrammingAccessEnabled() {
-        return programmingAccessEnabled;
     }
 
     public Instant getCreatedAt() {
