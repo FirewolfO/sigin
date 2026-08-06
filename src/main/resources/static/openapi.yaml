@@ -202,6 +202,43 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+  /account/password:
+    put:
+      operationId: updatePassword
+      summary: Update the current account password after verifying the current password
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePasswordRequest'
+      responses:
+        '200':
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [updated]
+                        properties:
+                          updated:
+                            type: boolean
+                            const: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /account/api-credentials:
     get:
       operationId: listApiCredentials
@@ -518,6 +555,20 @@ components:
           type: [string, 'null']
           format: uri
           maxLength: 1000
+    UpdatePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 72
+        newPassword:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
     CreateApiCredentialRequest:
       type: object
       required: [name]

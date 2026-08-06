@@ -67,6 +67,15 @@ public class AccountService {
     }
 
     @Transactional
+    public void updatePassword(String username, PasswordCommand command) {
+        Account account = getByUsername(username);
+        if (!passwordEncoder.matches(command.currentPassword(), account.getPasswordHash())) {
+            throw DomainException.invalid("当前密码错误");
+        }
+        account.updatePassword(passwordEncoder.encode(command.newPassword()));
+    }
+
+    @Transactional
     public Account recordLogin(String username) {
         Account account = getByUsername(username);
         account.recordLogin();
@@ -101,5 +110,8 @@ public class AccountService {
     }
 
     public record ProfileCommand(String displayName, String email, String phone, String avatarUrl) {
+    }
+
+    public record PasswordCommand(String currentPassword, String newPassword) {
     }
 }

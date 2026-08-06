@@ -46,6 +46,7 @@ Webhook 接收 `POST` JSON 请求，字段为 `channel`（`EMAIL` 或 `PHONE`）
 | `GET` | `/api/v1/auth/me` | 是 | 获取当前用户 |
 | `POST` | `/api/v1/auth/logout` | 是 | 注销并使 Session 失效 |
 | `PUT` | `/api/v1/account/profile` | 是 | 修改显示名称、邮箱、手机号和头像 |
+| `PUT` | `/api/v1/account/password` | 是 | 校验当前密码后修改登录密码 |
 | `GET/POST` | `/api/v1/account/api-credentials` | 是 | 查询或创建用户 API AK/SK |
 | `POST` | `/api/v1/account/api-credentials/{id}/secret` | 是 | 按需读取当前账号的一条 SK，用于显式复制 |
 | `DELETE` | `/api/v1/account/api-credentials/{id}` | 是 | 删除用户 API AK/SK |

@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/v1/account")
 public class ProfileController {
@@ -27,5 +29,14 @@ public class ProfileController {
         Account account = accountService.updateProfile(authentication.getName(), new AccountService.ProfileCommand(
                 body.displayName(), body.email(), body.phone(), body.avatarUrl()));
         return ApiResponse.ok(request, UserView.from(account));
+    }
+
+    @PutMapping("/password")
+    public ApiResponse<Map<String, Boolean>> updatePassword(Authentication authentication,
+                                                            @Valid @RequestBody UpdatePasswordRequest body,
+                                                            HttpServletRequest request) {
+        accountService.updatePassword(authentication.getName(),
+                new AccountService.PasswordCommand(body.currentPassword(), body.newPassword()));
+        return ApiResponse.ok(request, Map.of("updated", true));
     }
 }

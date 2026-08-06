@@ -103,6 +103,10 @@ public class Account {
         this.avatarUrl = avatarUrl;
     }
 
+    public void updatePassword(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
     public void recordLogin() {
         this.lastLoginAt = Instant.now();
     }

@@ -80,6 +80,64 @@ class AuthFlowIntegrationTest {
     }
 
     @Test
+    void changesPasswordAfterVerifyingCurrentPassword() throws Exception {
+        MockHttpSession session = register("passworduser", "Secret123!", "Password User");
+
+        CsrfValues wrongPasswordCsrf = csrfValues();
+        mockMvc.perform(put("/api/v1/account/password")
+                        .session(session)
+                        .cookie(wrongPasswordCsrf.cookie())
+                        .header("X-XSRF-TOKEN", wrongPasswordCsrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"Wrong123!","newPassword":"Updated123!"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"))
+                .andExpect(jsonPath("$.message").value("当前密码错误"));
+
+        Account unchanged = accountRepository.findByUsernameNormalized("passworduser").orElseThrow();
+        assertThat(passwordEncoder.matches("Secret123!", unchanged.getPasswordHash())).isTrue();
+
+        CsrfValues updateCsrf = csrfValues();
+        mockMvc.perform(put("/api/v1/account/password")
+                        .session(session)
+                        .cookie(updateCsrf.cookie())
+                        .header("X-XSRF-TOKEN", updateCsrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"Secret123!","newPassword":"Updated123!"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.updated").value(true));
+
+        Account updated = accountRepository.findByUsernameNormalized("passworduser").orElseThrow();
+        assertThat(passwordEncoder.matches("Secret123!", updated.getPasswordHash())).isFalse();
+        assertThat(passwordEncoder.matches("Updated123!", updated.getPasswordHash())).isTrue();
+
+        CsrfValues oldLoginCsrf = csrfValues();
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .cookie(oldLoginCsrf.cookie())
+                        .header("X-XSRF-TOKEN", oldLoginCsrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"identifier":"passworduser","password":"Secret123!"}
+                                """))
+                .andExpect(status().isUnauthorized());
+
+        CsrfValues newLoginCsrf = csrfValues();
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .cookie(newLoginCsrf.cookie())
+                        .header("X-XSRF-TOKEN", newLoginCsrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"identifier":"passworduser","password":"Updated123!"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.username").value("passworduser"));
+    }
+
+    @Test
     void loginWithSingleUseCodesForEmailAndPhone() throws Exception {
         registerWithContacts("dana", "Dana@Example.com", "+8613900139000");
 
