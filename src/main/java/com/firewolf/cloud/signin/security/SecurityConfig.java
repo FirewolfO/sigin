@@ -23,12 +23,14 @@ import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
@@ -73,14 +75,24 @@ public class SecurityConfig {
     }
 
     @Bean
+    GatewayHmacFilter gatewayHmacFilter(
+            @Value("${signin.inner.gateway-access-key}") String accessKey,
+            @Value("${signin.inner.gateway-secret-key}") String secretKey,
+            @Value("${signin.inner.signature-skew:5m}") Duration signatureSkew) {
+        return new GatewayHmacFilter(accessKey, secretKey, signatureSkew);
+    }
+
+    @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http,
                                             SecurityContextRepository securityContextRepository,
                                             CorsConfigurationSource corsConfigurationSource,
-                                            CsrfTokenRepository csrfTokenRepository) throws Exception {
+                                            CsrfTokenRepository csrfTokenRepository,
+                                            GatewayHmacFilter gatewayHmacFilter) throws Exception {
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
+                        .ignoringRequestMatchers("/api/v1/inner/**")
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
                 .securityContext(context -> context
                         .securityContextRepository(securityContextRepository)
@@ -90,6 +102,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/v1/auth/csrf", "/api/v1/auth/login", "/api/v1/auth/register",
                                 "/api/v1/auth/verification-codes", "/api/v1/auth/code-login").permitAll()
+                        .requestMatchers("/api/v1/inner/**").permitAll()
                         .requestMatchers("/actuator/health", "/error", "/openapi.yaml").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors
@@ -104,6 +117,8 @@ public class SecurityConfig {
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable());
 
+        http.addFilterBefore(gatewayHmacFilter, UsernamePasswordAuthenticationFilter.class);
+
         return http.build();
     }
 
@@ -115,7 +130,7 @@ public class SecurityConfig {
                 .map(String::trim)
                 .filter(value -> !value.isEmpty())
                 .toList());
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "OPTIONS"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Content-Type", "X-XSRF-TOKEN", "X-Request-ID"));
         configuration.setExposedHeaders(List.of("X-Request-ID"));
         configuration.setAllowCredentials(true);

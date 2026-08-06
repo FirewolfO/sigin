@@ -2,6 +2,7 @@ package com.firewolf.cloud.signin;
 
 import com.firewolf.cloud.signin.account.Account;
 import com.firewolf.cloud.signin.account.AccountRepository;
+import com.firewolf.cloud.signin.credential.ApiCredentialRepository;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,9 +16,17 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import jakarta.servlet.http.Cookie;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -35,10 +44,14 @@ class AuthFlowIntegrationTest {
     private AccountRepository accountRepository;
 
     @Autowired
+    private ApiCredentialRepository apiCredentialRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @BeforeEach
     void clearAccounts() {
+        apiCredentialRepository.deleteAll();
         accountRepository.deleteAll();
     }
 
@@ -159,6 +172,71 @@ class AuthFlowIntegrationTest {
         assertThat(session.isInvalid()).isTrue();
     }
 
+    @Test
+    void managesApiCredentialsAndProtectsInnerResolution() throws Exception {
+        MockHttpSession session = register("developer", "Secret123!", "Developer");
+        CsrfValues createCsrf = csrfValues();
+        MvcResult created = mockMvc.perform(post("/api/v1/account/api-credentials")
+                        .session(session)
+                        .cookie(createCsrf.cookie())
+                        .header("X-XSRF-TOKEN", createCsrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"本地开发\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessKey").value(org.hamcrest.Matchers.startsWith("uak_")))
+                .andExpect(jsonPath("$.data.secretKey").value(org.hamcrest.Matchers.startsWith("usk_")))
+                .andReturn();
+        String credentialId = JsonPath.read(created.getResponse().getContentAsString(), "$.data.id");
+        String accessKey = JsonPath.read(created.getResponse().getContentAsString(), "$.data.accessKey");
+        String secretKey = JsonPath.read(created.getResponse().getContentAsString(), "$.data.secretKey");
+
+        mockMvc.perform(get("/api/v1/account/api-credentials").session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].secretKey").value("************************"));
+        mockMvc.perform(get("/api/v1/account/programming-access").session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enabled").value(false));
+
+        String resolveBody = "{\"accessKey\":\"" + accessKey + "\"}";
+        mockMvc.perform(post("/api/v1/inner/credentials/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(resolveBody))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        mockMvc.perform(signedInnerPost("/api/v1/inner/credentials/resolve", resolveBody))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PROGRAMMING_ACCESS_DISABLED"));
+
+        CsrfValues toggleCsrf = csrfValues();
+        mockMvc.perform(put("/api/v1/account/programming-access")
+                        .session(session)
+                        .cookie(toggleCsrf.cookie())
+                        .header("X-XSRF-TOKEN", toggleCsrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enabled").value(true));
+
+        mockMvc.perform(signedInnerPost("/api/v1/inner/credentials/resolve", resolveBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessKey").value(accessKey))
+                .andExpect(jsonPath("$.data.secretKey").value(secretKey))
+                .andExpect(jsonPath("$.data.expiresAt").doesNotExist());
+        mockMvc.perform(signedInnerPost("/api/v1/inner/credentials/exchange", "{}").session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessKey").value(org.hamcrest.Matchers.startsWith("utak_")))
+                .andExpect(jsonPath("$.data.secretKey").value(org.hamcrest.Matchers.startsWith("utsk_")))
+                .andExpect(jsonPath("$.data.expiresAt").isString());
+
+        CsrfValues deleteCsrf = csrfValues();
+        mockMvc.perform(delete("/api/v1/account/api-credentials/{id}", credentialId)
+                        .session(session)
+                        .cookie(deleteCsrf.cookie())
+                        .header("X-XSRF-TOKEN", deleteCsrf.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.deleted").value(true));
+    }
+
     private MockHttpSession register(String username, String password, String displayName) throws Exception {
         CsrfValues csrf = csrfValues();
         return (MockHttpSession) mockMvc.perform(post("/api/v1/auth/register")
@@ -254,6 +332,27 @@ class AuthFlowIntegrationTest {
         Cookie cookie = result.getResponse().getCookie("XSRF-TOKEN");
         assertThat(cookie).isNotNull();
         return new CsrfValues(cookie, cookie.getValue());
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder signedInnerPost(
+            String path, String body) throws Exception {
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String nonce = UUID.randomUUID().toString().replace("-", "");
+        String payloadHash = HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(body.getBytes(StandardCharsets.UTF_8)));
+        String canonical = String.join("\n", "POST", path, "", timestamp, nonce, payloadHash);
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec("0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8),
+                "HmacSHA256"));
+        String signature = HexFormat.of().formatHex(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+        return post(path)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+                .header("X-Gateway-Credential", "gwak_gateway_test")
+                .header("X-Gateway-Timestamp", timestamp)
+                .header("X-Gateway-Nonce", nonce)
+                .header("X-Gateway-Content-SHA256", payloadHash)
+                .header("X-Gateway-Signature", signature);
     }
 
     private record CsrfValues(Cookie cookie, String token) {

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Cloud Sign-in API
-  version: 0.1.0
-  description: Account registration, browser session authentication and profile management.
+  version: 0.2.0
+  description: Account authentication, profile management and user API credential lifecycle.
   license:
     name: Proprietary
     url: https://github.com/FirewolfO/sigin
@@ -202,12 +202,204 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+  /account/api-credentials:
+    get:
+      operationId: listApiCredentials
+      summary: List the current account API credentials
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Credential list with masked secret keys
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ApiCredential'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createApiCredential
+      summary: Create an API credential and return its secret once
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApiCredentialRequest'
+      responses:
+        '200':
+          description: Created credential including its one-time plaintext secret
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ApiCredential'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /account/api-credentials/{id}:
+    delete:
+      operationId: deleteApiCredential
+      summary: Delete one API credential owned by the current account
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Credential deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Credential not found
+  /account/programming-access:
+    get:
+      operationId: getProgrammingAccess
+      summary: Read the current programming access setting
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Programming access setting
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProgrammingAccess'
+    put:
+      operationId: updateProgrammingAccess
+      summary: Enable or disable permanent API credential access
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProgrammingAccess'
+      responses:
+        '200':
+          description: Updated programming access setting
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /inner/credentials/resolve:
+    post:
+      operationId: resolveApiCredential
+      summary: Resolve an enabled account API credential for Gateway verification
+      security:
+        - gatewayCredential: []
+          gatewaySignature: []
+          gatewayTimestamp: []
+          gatewayNonce: []
+          gatewayPayloadHash: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accessKey]
+              properties:
+                accessKey:
+                  type: string
+                  maxLength: 64
+      responses:
+        '200':
+          description: Resolved credential for the trusted Gateway only
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IssuedCredential'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Programming access is disabled
+  /inner/credentials/exchange:
+    post:
+      operationId: exchangeSessionCredential
+      summary: Exchange a browser session for a short-lived credential
+      security:
+        - sessionCookie: []
+          gatewayCredential: []
+          gatewaySignature: []
+          gatewayTimestamp: []
+          gatewayNonce: []
+          gatewayPayloadHash: []
+      responses:
+        '200':
+          description: Short-lived credential for Gateway request signing
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IssuedCredential'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 components:
   securitySchemes:
     sessionCookie:
       type: apiKey
       in: cookie
       name: CLOUD_SESSION
+    gatewayCredential:
+      type: apiKey
+      in: header
+      name: X-Gateway-Credential
+    gatewaySignature:
+      type: apiKey
+      in: header
+      name: X-Gateway-Signature
+    gatewayTimestamp:
+      type: apiKey
+      in: header
+      name: X-Gateway-Timestamp
+    gatewayNonce:
+      type: apiKey
+      in: header
+      name: X-Gateway-Nonce
+    gatewayPayloadHash:
+      type: apiKey
+      in: header
+      name: X-Gateway-Content-SHA256
   parameters:
     CsrfHeader:
       name: X-XSRF-TOKEN
@@ -332,6 +524,51 @@ components:
           type: [string, 'null']
           format: uri
           maxLength: 1000
+    CreateApiCredentialRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+    ApiCredential:
+      type: object
+      required: [id, name, accessKey, secretKey, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        accessKey:
+          type: string
+        secretKey:
+          type: string
+          description: Plaintext only in the create response; masked in list responses.
+        createdAt:
+          type: string
+          format: date-time
+    ProgrammingAccess:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+    IssuedCredential:
+      type: object
+      required: [accountId, accessKey, secretKey]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        accessKey:
+          type: string
+        secretKey:
+          type: string
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
     User:
       type: object
       required: [id, username, displayName, createdAt, updatedAt]

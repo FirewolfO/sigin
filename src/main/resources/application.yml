@@ -40,6 +40,13 @@ management:
 
 signin:
   allowed-origins: ${SIGNIN_ALLOWED_ORIGINS:http://localhost:5176,http://127.0.0.1:5176}
+  credentials:
+    encryption-key: ${SIGNIN_CREDENTIAL_ENCRYPTION_KEY:}
+    temporary-ttl: 5m
+  inner:
+    gateway-access-key: ${SIGNIN_INNER_GATEWAY_ACCESS_KEY:}
+    gateway-secret-key: ${SIGNIN_INNER_GATEWAY_SECRET_KEY:}
+    signature-skew: 5m
   verification-code:
     ttl: 5m
     resend-interval: 60s

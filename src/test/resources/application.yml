@@ -12,5 +12,12 @@ spring:
 
 signin:
   allowed-origins: http://localhost:5176
+  credentials:
+    encryption-key: 0123456789abcdef0123456789abcdef
+    temporary-ttl: 5m
+  inner:
+    gateway-access-key: gwak_gateway_test
+    gateway-secret-key: 0123456789abcdef0123456789abcdef
+    signature-skew: 5m
   verification-code:
     expose-in-response: true

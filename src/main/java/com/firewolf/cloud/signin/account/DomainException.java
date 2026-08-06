@@ -37,6 +37,18 @@ public class DomainException extends RuntimeException {
         return new DomainException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", message);
     }
 
+    public static DomainException notFound(String message) {
+        return new DomainException(HttpStatus.NOT_FOUND, "NOT_FOUND", message);
+    }
+
+    public static DomainException programmingAccessDisabled() {
+        return new DomainException(HttpStatus.FORBIDDEN, "PROGRAMMING_ACCESS_DISABLED", "账号尚未开启编程访问");
+    }
+
+    public static DomainException innerUnauthorized() {
+        return new DomainException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "内部调用认证失败");
+    }
+
     public HttpStatus getStatus() {
         return status;
     }
